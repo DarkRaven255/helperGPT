@@ -103,7 +103,7 @@ func newConversationForm(gptScenario *gpt.GptScenario) *widget.Form {
 	response.TextStyle.Monospace = true
 
 	var wg sync.WaitGroup
-	var ch = make(chan string)
+	var ch = make(chan api.ReturnMessage)
 	var result interface{}
 	var responseMessage gpt.Message
 
@@ -124,29 +124,31 @@ func newConversationForm(gptScenario *gpt.GptScenario) *widget.Form {
 			go func() {
 				wg.Add(1)
 				go api.GetResponse(*gptScenario.Conversation, ch, &wg)
-				// if err != nil {
-				// 	log.Println(err)
-				// }
 			}()
 
 			go func() {
-				err := json.Unmarshal([]byte(<-ch), &result)
-				if err != nil {
-					log.Println(err)
+				res := <-ch
+				if res.Err != nil {
+					log.Println(res.Err.Error())
+				} else {
+					err := json.Unmarshal([]byte(res.Message), &result)
+					if err != nil {
+						log.Println(err)
+					}
+					choices := result.(map[string]interface{})["choices"].([]interface{})[0].(map[string]interface{})["message"]
+
+					out, err := json.Marshal(choices)
+					if err != nil {
+						log.Println(err)
+					}
+					json.Unmarshal(out, &responseMessage)
+
+					gptScenario.Conversation.AddMessage(responseMessage)
+
+					log.Println("Response:", responseMessage.Content)
+
+					response.SetText(gptScenario.Conversation.PrintConversation())
 				}
-				choices := result.(map[string]interface{})["choices"].([]interface{})[0].(map[string]interface{})["message"]
-
-				out, err := json.Marshal(choices)
-				if err != nil {
-					log.Println(err)
-				}
-				json.Unmarshal(out, &responseMessage)
-
-				gptScenario.Conversation.AddMessage(responseMessage)
-
-				log.Println("Response:", responseMessage.Content)
-
-				response.SetText(gptScenario.Conversation.PrintConversation())
 			}()
 
 		},
