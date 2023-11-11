@@ -8,39 +8,43 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 )
 
-func GetResponse(conversation gpt.Conversation) (string, error) {
+func GetResponse(conversation gpt.Conversation, ch chan<- string, wg *sync.WaitGroup) {
 
+	defer wg.Done()
 	url := "https://api.openai.com/v1/chat/completions"
 	bearerToken := "Bearer " + config.GetConfig().ApiKey
 
-	reqBody, err := json.Marshal(conversation)
-	if err != nil {
-		return "", err
-	}
+	reqBody, _ := json.Marshal(conversation)
+	// if err != nil {
+	// 	return err
+	// }
 
 	log.Printf(string(reqBody))
 
-	req, err := http.NewRequest("POST", url, strings.NewReader(string(reqBody)))
-	if err != nil {
-		return "", err
-	}
+	req, _ := http.NewRequest("POST", url, strings.NewReader(string(reqBody)))
+	// if err != nil {
+	// 	return err
+	// }
 
 	req.Header.Add("Authorization", bearerToken)
 	req.Header.Add("Content-type", "application/json")
 
 	client := http.Client{}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
+	resp, _ := client.Do(req)
+	// if err != nil {
+	// 	return err
+	// }
 
-	bodyResp, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
+	defer resp.Body.Close()
+	bodyResp, _ := io.ReadAll(resp.Body)
+	// if err != nil {
+	// 	return err
+	// }
 
-	return string(bodyResp), nil
+	ch <- string(bodyResp)
+	// return nil
 }

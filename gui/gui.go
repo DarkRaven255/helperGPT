@@ -7,6 +7,7 @@ import (
 	"helperGPT/gpt"
 	"helperGPT/gpt/scenario"
 	"log"
+	"sync"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -84,11 +85,6 @@ func newScenarioButton(scenarioName string) *widget.Button {
 
 			tabMap[scenarioIdGenerator(scenarioName)] = (container.NewTabItem(scenarioIdGenerator(scenarioName), inputForm))
 			tabs.Append(tabMap[scenarioIdGenerator(scenarioName)])
-
-			inputForm.OnCancel = func() {
-				tabs.Remove(tabMap[scenarioIdGenerator(gptScenario.Conversation.Scenario, gptScenario.Conversation.Model)])
-				delete(tabMap, scenarioIdGenerator(gptScenario.Conversation.Scenario, gptScenario.Conversation.Model))
-			}
 		}
 		tabs.Select(tabMap[scenarioIdGenerator(scenarioName)])
 	})
@@ -99,9 +95,17 @@ func newConversationForm(gptScenario *gpt.GptScenario) *widget.Form {
 
 	input := widget.NewMultiLineEntry()
 	input.SetMinRowsVisible(5)
+	input.Wrapping = fyne.TextWrapWord
 
 	response := widget.NewMultiLineEntry()
 	response.SetMinRowsVisible(20)
+	response.Wrapping = fyne.TextWrapWord
+	response.TextStyle.Monospace = true
+
+	var wg sync.WaitGroup
+	var ch = make(chan string)
+	var result interface{}
+	var responseMessage gpt.Message
 
 	form := &widget.Form{
 		Items: []*widget.FormItem{
@@ -117,33 +121,42 @@ func newConversationForm(gptScenario *gpt.GptScenario) *widget.Form {
 
 			input.SetText("")
 			response.SetText(gptScenario.Conversation.PrintConversation())
+			go func() {
+				wg.Add(1)
+				go api.GetResponse(*gptScenario.Conversation, ch, &wg)
+				// if err != nil {
+				// 	log.Println(err)
+				// }
+			}()
 
-			resp, err := api.GetResponse(*gptScenario.Conversation)
-			if err != nil {
-				log.Println(err)
-			}
+			go func() {
+				err := json.Unmarshal([]byte(<-ch), &result)
+				if err != nil {
+					log.Println(err)
+				}
+				choices := result.(map[string]interface{})["choices"].([]interface{})[0].(map[string]interface{})["message"]
 
-			var result interface{}
-			err = json.Unmarshal([]byte(resp), &result)
-			if err != nil {
-				log.Println(err)
-			}
+				out, err := json.Marshal(choices)
+				if err != nil {
+					log.Println(err)
+				}
+				json.Unmarshal(out, &responseMessage)
 
-			choices := result.(map[string]interface{})["choices"].([]interface{})[0].(map[string]interface{})["message"]
+				gptScenario.Conversation.AddMessage(responseMessage)
 
-			out, err := json.Marshal(choices)
-			if err != nil {
-				log.Println(err)
-			}
+				log.Println("Response:", responseMessage.Content)
 
-			var responseMessage gpt.Message
-			json.Unmarshal(out, &responseMessage)
+				response.SetText(gptScenario.Conversation.PrintConversation())
+			}()
 
-			gptScenario.Conversation.AddMessage(responseMessage)
-
-			log.Println("Response:", responseMessage.Content)
-
-			response.SetText(gptScenario.Conversation.PrintConversation())
+		},
+		OnCancel: func() {
+			tabs.Remove(tabMap[scenarioIdGenerator(gptScenario.Conversation.Scenario, gptScenario.Conversation.Model)])
+			delete(tabMap, scenarioIdGenerator(gptScenario.Conversation.Scenario, gptScenario.Conversation.Model))
+			go func() {
+				wg.Wait()
+				close(ch)
+			}()
 		},
 	}
 
